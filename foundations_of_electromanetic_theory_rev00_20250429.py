@@ -194,7 +194,8 @@ class ES2D:
         coordi_x, coordi_y = np.meshgrid(x_range, y_range)              # making meshgrid
 
         # electric potential
-        self.phi = np.zeros([self.x_nodes, self.y_nodes], dtype=np.float64)
+        self.phi  = np.ones([self.x_nodes, self.y_nodes], dtype=np.float64)
+        self.phi *= (unit_cell_info['bias']['gate'] + unit_cell_info['bias']['pch_e'] + unit_cell_info['bias']['pch_o']) / 3.0
 
         # gate
         gate_major_cd_half = gate_major_cd / 2.0
@@ -285,28 +286,16 @@ class ES2D:
 # main
 #
 
-geometry_info = {}
-geometry_info['x'] = {'length':11.0, 'elements':110}         # in m, ea
-geometry_info['y'] = {'length':6.0,  'elements':60}         # in m, ea
-
-bias_conditions = {}
-bias_conditions['x'] = {'left':0.3, 'right':0.7}
-bias_conditions['y'] = {'upper':1.0, 'lower':0.0}
-
-unit_cell_info = {}
-unit_cell_info['coordi_x_limit'] = {'lower':-1000.0, 'upper':1000.0, 'elements': 2000}
-unit_cell_info['coordi_y_limit'] = {'lower':-1000.0, 'upper':1000.0, 'elements': 2000}
-unit_cell_info['ponoa_alo'] = {'thk':[30.0], 'k':9.0}
-unit_cell_info['ponoa_box'] = {'thk':[70.0], 'k':4.5}
-unit_cell_info['ponoa_ctn'] = {'thk':[54.0], 'k':7.5}
-unit_cell_info['ponoa_tox'] = {'thk':[48.0], 'k':5.0}
-unit_cell_info['ponoa_pch'] = {'thk':[70.0, 60.0], 'k':11.7}
-unit_cell_info['gate'] = {'major_CD':1500.0, 'distortion':0.7}
-unit_cell_info['cut_cd'] = 540.0
-unit_cell_info['bias'] = {'gate':7.0, 'pch_e':0.0, 'pch_o':0.0}
-
 # text example
 if False:
+    geometry_info = {}
+    geometry_info['x'] = {'length':11.0, 'elements':110}         # in m, ea
+    geometry_info['y'] = {'length':6.0,  'elements':60}         # in m, ea
+
+    bias_conditions = {}
+    bias_conditions['x'] = {'left':0.3, 'right':0.7}
+    bias_conditions['y'] = {'upper':1.0, 'lower':0.0}
+
     ex3_5 = ES2D()
     ex3_5.make_rectangular_box(geometry_info)
     ex3_5.dirichlet_boundary_conditions(bias_conditions)
@@ -314,6 +303,18 @@ if False:
 
 # silicon work
 if True:
+    unit_cell_info = {}
+    unit_cell_info['coordi_x_limit'] = {'lower':-1000.0, 'upper':1000.0, 'elements': 2000}
+    unit_cell_info['coordi_y_limit'] = {'lower':-1000.0, 'upper':1000.0, 'elements': 2000}
+    unit_cell_info['ponoa_alo'] = {'thk':[30.0], 'k':9.0}
+    unit_cell_info['ponoa_box'] = {'thk':[70.0], 'k':4.5}
+    unit_cell_info['ponoa_ctn'] = {'thk':[54.0], 'k':7.5}
+    unit_cell_info['ponoa_tox'] = {'thk':[48.0], 'k':5.0}
+    unit_cell_info['ponoa_pch'] = {'thk':[70.0, 60.0], 'k':11.7}
+    unit_cell_info['gate'] = {'major_CD':1500.0, 'distortion':0.7}
+    unit_cell_info['cut_cd'] = 540.0
+    unit_cell_info['bias'] = {'gate':7.0, 'pch_e':0.0, 'pch_o':0.0}
+
     silicon = ES2D()
     silicon.make_unit_cell_geometry(unit_cell_info)
     silicon.finite_difference_method2(overrelaxation=0.2, conv_error=1e-4)
@@ -326,4 +327,5 @@ if True:
     ax[1,0].imshow(silicon.em)
     ax[1,1].imshow(silicon.phi)
     plt.show()
+
 
