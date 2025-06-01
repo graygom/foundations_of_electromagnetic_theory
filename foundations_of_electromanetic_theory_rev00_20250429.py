@@ -11,7 +11,8 @@ import sys
 import time
 import pickle
 import numpy as np
-import scipy as sp
+import scipy as sc
+import sympy as sy
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 
@@ -35,6 +36,17 @@ import matplotlib.pyplot as plt
 # overrelaxation for fast convergence
 # φ(i,j,n+1) = w * ( ( φ(i+1,j,n) + φ(i-1,j,n) ) / dx**2 + ( φ(i,j+1,n) + φ(i,j-1,n) ) / dy*2 ) / ( 2 / dx**2 + 2 / dy**2 )
 #                + (1 - w ) * φ(i,j,n) 
+#
+#
+# Poisson equation: ∇·( ε(x,y) * ∇φ(x,y) ) = -ρ(x,y),
+# ∇ε(x,y) · ∇φ(x,y) + ε(x,y) * ∇·∇φ(x,y) = -ρ(x,y),
+# 
+#
+#
+#
+#
+#
+#
 #
 
 class ES2D:
@@ -377,6 +389,7 @@ class ES2D:
         fig, ax = plt.subplots(1, 1)
         #
         plt.imshow(self.mat, cmap=cm.jet)
+        plt.axis('equal')
         plt.grid(ls=':')
         plt.colorbar()
         plt.title('Materials')
@@ -386,6 +399,7 @@ class ES2D:
         fig, ax = plt.subplots(1, 1)
         #
         plt.imshow(self.bias, cmap=cm.jet)
+        plt.axis('equal')
         plt.grid(ls=':')
         plt.colorbar()
         plt.title('Bias')
@@ -395,6 +409,7 @@ class ES2D:
         fig, ax = plt.subplots(1, 1)
         #
         CS1 = plt.contour(coordi_x, coordi_y, self.phi, levels=15, cmap=cm.jet)
+        plt.axis('equal')
         plt.grid(ls=':')
         plt.colorbar()
         plt.title('Electric Potential')
@@ -404,6 +419,7 @@ class ES2D:
         fig, ax = plt.subplots(1, 1)
         #
         CS2 = plt.contour(coordi_x, coordi_y, self.em, levels=30, cmap=cm.jet)
+        plt.axis('equal')
         plt.grid(ls=':')
         plt.colorbar()
         plt.title('Electric Field Magnitude')
@@ -413,6 +429,7 @@ class ES2D:
         fig, ax = plt.subplots(1, 1)
         #
         CSF1 = plt.contourf(coordi_x, coordi_y, self.phi, levels=10, cmap=cm.jet)   # cmap="RdBu_r"
+        plt.axis('equal')
         plt.grid(ls=':')
         plt.colorbar()
         plt.title('Electric Potential')
@@ -422,12 +439,118 @@ class ES2D:
         fig, ax = plt.subplots(1, 1)
         #
         CSF2 = plt.contourf(coordi_x, coordi_y, self.em, levels=100, cmap=cm.jet)   # cmap="RdBu_r"
+        plt.axis('equal')
         plt.grid(ls=':')
         plt.colorbar()
         plt.title('Electric Field Magnitude')
         plt.savefig('figure_6_em_f.pdf')
 
         plt.close()
+
+
+    def analysis2(self, unit_cell_info):
+        #
+        onoa_alo_thk = unit_cell_info['ponoa_alo']['thk'][0]
+        onoa_box_thk = unit_cell_info['ponoa_box']['thk'][0]
+        onoa_ctn_thk = unit_cell_info['ponoa_ctn']['thk'][0]
+        onoa_tox_thk = unit_cell_info['ponoa_tox']['thk'][0]
+
+        onoa_thk = np.sum([onoa_alo_thk, onoa_box_thk, onoa_ctn_thk, onoa_tox_thk])
+        
+        #
+        x_center_index = int( (self.x_nodes - 1) / 2.0 )
+        y_center_index = int( (self.y_nodes - 1) / 2.0 )
+
+        #
+        phi_at_x_center = self.phi[x_center_index, :]
+        phi_at_y_center = self.phi[:, y_center_index]
+
+        #
+        em_at_x_center = self.em[x_center_index, :]
+        em_at_y_center = self.em[:, y_center_index]
+
+        #
+        coordi_x, coordi_y = np.meshgrid(self.x_range, self.y_range) 
+
+        # text information
+        fdm_nodes = np.sum(np.where(self.mat != 0.0, 1.0, 0.0))
+        dirichlet_nodes = np.sum(np.where(self.mat == 0.0, 1.0, 0.0))
+        print('Number of FDM nodes = %i ea' % fdm_nodes)
+        print('Number of Dirichlet nodes = %i ea' % dirichlet_nodes)
+        
+        # Sympy
+        major_r = unit_cell_info['gate']['major_CD'] / 2.0
+        minor_r = major_r *unit_cell_info['gate']['distortion']
+
+        major_r2 = major_r - onoa_thk
+        minor_r2 = minor_r - onoa_thk
+
+        # Sympy
+        sy_theta = sy.symbols('theta')
+        sy_x3 = sy.symbols('x')
+        
+        # Sympy
+        sy_x = major_r * sy.cos(sy_theta)
+        sy_y = minor_r * sy.sin(sy_theta)
+
+        sy_x2 = major_r2 * sy.cos(sy_theta)
+        sy_y2 = minor_r2 * sy.sin(sy_theta)
+
+        dsy_x2_dtheta = sy_x2.diff(sy_theta)
+        dsy_y2_dtheta = sy_y2.diff(sy_theta)
+
+        sy_normal = -dsy_x2_dtheta / dsy_y2_dtheta
+        
+        #
+        sy_x_eval = []
+        sy_y_eval = []
+
+        sy_x_eval2 = []
+        sy_y_eval2 = []
+
+        sy_x_eval3 = []
+        sy_y_eval3 = []
+
+        #
+        for theta in np.linspace(0.0, 2*np.pi-2*np.pi/50, 50):
+            sy_x_eval.append(sy_x.subs(sy_theta, theta))
+            sy_y_eval.append(sy_y.subs(sy_theta, theta))
+
+            sy_x_eval2.append(sy_x2.subs(sy_theta, theta))
+            sy_y_eval2.append(sy_y2.subs(sy_theta, theta))
+
+            #
+            sy_x_eval3.append([])
+            sy_y_eval3.append([])
+            
+            sy_normal_line_x = sy_x2 + sy_x3
+            sy_normal_line_y = sy_y2 + (sy_normal) * sy_x3
+
+            normal = sy_normal.subs(sy_theta, theta)
+
+            for x in [10, 20, 30]:
+                sy_x_eval3[-1].append(sy_normal_line_x.subs( [(sy_theta, theta), (sy_x3, x)] ))
+                sy_y_eval3[-1].append(sy_normal_line_y.subs( [(sy_theta, theta), (sy_x3, x)] ))
+
+            #print(sy_x_eval2[-1], sy_y_eval2[-1], normal, sy_x_eval3[-1], sy_y_eval3[-1])
+
+        # visualization 3
+        fig, ax = plt.subplots(1, 1)
+        #
+        CS1 = plt.contour(coordi_x, coordi_y, self.phi, levels=15, cmap=cm.jet)
+        plt.axis('equal')
+        plt.grid(ls=':')
+        plt.colorbar()
+        plt.title('Electric Potential')
+        plt.savefig('figure_3_phi_.pdf')
+
+        #
+        plt.plot(sy_x_eval, sy_y_eval, '.')
+        plt.plot(sy_x_eval2, sy_y_eval2, '.')
+        for cnt in range(len(sy_x_eval3)):
+            plt.plot(sy_x_eval3[cnt], sy_y_eval3[cnt], 'o-')
+        plt.axis('equal')
+        plt.show()
         
 
         
@@ -482,9 +605,18 @@ if True:
         silicon.save_FDM_result(output_filename='FDM_result_150nm_0.7_cut_54nm_onoa_30_70_54_46_pch_70_60_5e-6.pkl')
         silicon.analysis()
 
+    if False:
+        silicon.load_FDM_result(input_filename='FDM_result_150nm_0.7_cut_54nm_onoa_30_70_54_46_pch_70_60_5e-6.pkl')
+        silicon.before_finite_difference_method(overrelaxation=0.2, conv_error=1e-6)
+        silicon.finite_difference_method2()
+        silicon.finite_difference_method_error_check()
+        silicon.save_FDM_result(output_filename='FDM_result_150nm_0.7_cut_54nm_onoa_30_70_54_46_pch_70_60_1e-6.pkl')
+        silicon.analysis()
+
     if True:
         silicon.load_FDM_result(input_filename='FDM_result_150nm_0.7_cut_54nm_onoa_30_70_54_46_pch_70_60_5e-6.pkl')
-        silicon.analysis()
+        #silicon.analysis()
+        silicon.analysis2(unit_cell_info)
 
 # visualization
 if False:
@@ -494,6 +626,7 @@ if False:
     ax[1,0].imshow(silicon.em)
     ax[1,1].imshow(silicon.phi)
     plt.show()
+
 
 
 
