@@ -449,7 +449,16 @@ class ES2D:
 
 
     def analysis2(self, unit_cell_info):
-        #
+        # coordinates
+        coordi_x_lower_limit = unit_cell_info['coordi_x_limit']['lower']
+        coordi_x_upper_limit = unit_cell_info['coordi_x_limit']['upper']
+        coordi_x_elements = unit_cell_info['coordi_x_limit']['elements']
+        coordi_x_upper_limit = unit_cell_info['coordi_x_limit']['upper']
+        coordi_y_lower_limit = unit_cell_info['coordi_y_limit']['lower']
+        coordi_y_upper_limit = unit_cell_info['coordi_y_limit']['upper']
+        coordi_y_elements = unit_cell_info['coordi_y_limit']['elements']
+        
+        # thickness
         onoa_alo_thk = unit_cell_info['ponoa_alo']['thk'][0]
         onoa_box_thk = unit_cell_info['ponoa_box']['thk'][0]
         onoa_ctn_thk = unit_cell_info['ponoa_ctn']['thk'][0]
@@ -457,19 +466,30 @@ class ES2D:
 
         onoa_thk = np.sum([onoa_alo_thk, onoa_box_thk, onoa_ctn_thk, onoa_tox_thk])
         
-        #
+        # coordinate: element length
+        dx = (coordi_x_upper_limit - coordi_x_lower_limit) / coordi_x_elements
+        dy = (coordi_y_upper_limit - coordi_y_lower_limit) / coordi_y_elements
+
+        # coorinage: number of nodes
+        x_nodes = int(coordi_x_elements + 1)
+        y_nodes = int(coordi_y_elements + 1)
+        
+        x_range = np.linspace(coordi_x_lower_limit, coordi_x_upper_limit, self.x_nodes, dtype=np.float64)
+        y_range = np.linspace(coordi_y_lower_limit, coordi_y_upper_limit, self.y_nodes, dtype=np.float64)
+
+        # center index
         x_center_index = int( (self.x_nodes - 1) / 2.0 )
         y_center_index = int( (self.y_nodes - 1) / 2.0 )
 
-        #
+        # center position
         phi_at_x_center = self.phi[x_center_index, :]
         phi_at_y_center = self.phi[:, y_center_index]
 
-        #
+        # center position
         em_at_x_center = self.em[x_center_index, :]
         em_at_y_center = self.em[:, y_center_index]
 
-        #
+        # making 2D mesh grid using x_range, y_range
         coordi_x, coordi_y = np.meshgrid(self.x_range, self.y_range) 
 
         # text information
@@ -477,83 +497,213 @@ class ES2D:
         dirichlet_nodes = np.sum(np.where(self.mat == 0.0, 1.0, 0.0))
         print('Number of FDM nodes = %i ea' % fdm_nodes)
         print('Number of Dirichlet nodes = %i ea' % dirichlet_nodes)
+
+        # scipy: interpolation 2d
+        interpol_2d = sc.interpolate.RegularGridInterpolator((x_range, y_range), self.phi, method='cubic')
+
+        # scipy: potential through line
+        interpol_phi = []
+        interpol_s = []
         
-        # Sympy
+        # Sympy: ellipse @gate
         major_r = unit_cell_info['gate']['major_CD'] / 2.0
         minor_r = major_r *unit_cell_info['gate']['distortion']
 
+        # Sympy: ellipse @channel
         major_r2 = major_r - onoa_thk
         minor_r2 = minor_r - onoa_thk
 
-        # Sympy
-        sy_theta = sy.symbols('theta')
-        sy_x3 = sy.symbols('x')
+        # Sympy: symbols
+        sy_theta, sy_x3 = sy.symbols('theta, x')
         
-        # Sympy
+        # Sympy: position @gate
         sy_x = major_r * sy.cos(sy_theta)
         sy_y = minor_r * sy.sin(sy_theta)
 
+        # Sympy: position @channel
         sy_x2 = major_r2 * sy.cos(sy_theta)
         sy_y2 = minor_r2 * sy.sin(sy_theta)
 
+        # Sympy: delta position @channel
         dsy_x2_dtheta = sy_x2.diff(sy_theta)
         dsy_y2_dtheta = sy_y2.diff(sy_theta)
+        sy_ds_dtheta = sy.sqrt(dsy_x2_dtheta**2 + dsy_y2_dtheta**2)
 
+        # Sympy: slope of normal line
         sy_normal = -dsy_x2_dtheta / dsy_y2_dtheta
+
+        # Sympy:
+        ch_major = unit_cell_info['gate']['major_CD']/2.0 - onoa_thk
+        ch_cut = unit_cell_info['cut_cd']/2.0
+        ch_cut_theta = np.arccos(ch_cut/ch_major)
         
-        #
+        # plot: electrode surface
         sy_x_eval = []
         sy_y_eval = []
 
+        # plot: channel surface
         sy_x_eval2 = []
         sy_y_eval2 = []
 
+        # plot: normal line
         sy_x_eval3 = []
         sy_y_eval3 = []
 
         #
-        for theta in np.linspace(0.0, 2*np.pi-2*np.pi/50, 50):
-            sy_x_eval.append(sy_x.subs(sy_theta, theta))
-            sy_y_eval.append(sy_y.subs(sy_theta, theta))
+        cal_theta = []
+        cal_dS = []
+        cal_T_length = []
+        cal_T_area = []
+        cal_T_current = []
 
-            sy_x_eval2.append(sy_x2.subs(sy_theta, theta))
-            sy_y_eval2.append(sy_y2.subs(sy_theta, theta))
-
-            #
+        # collecting plot points
+        theta_div = 100     # ea
+        line_div = 200      # ea
+        
+        for theta in np.linspace(0.0, ch_cut_theta, theta_div):
+            # plot: electrode surface
+            sy_x_eval.append(float(sy_x.subs(sy_theta, theta)))
+            sy_y_eval.append(float(sy_y.subs(sy_theta, theta)))
+            
+            # plot: channel surface
+            sy_x_eval2.append(float(sy_x2.subs(sy_theta, theta)))
+            sy_y_eval2.append(float(sy_y2.subs(sy_theta, theta)))
+            
+            # plot: line normal to channel surface
             sy_x_eval3.append([])
             sy_y_eval3.append([])
+
+            # finding theta2 from normal line slope 
+            theta2 = float(sy.atan(sy_normal).subs(sy_theta, theta))
+
+            # finding delta x, delta y position range
+            delta_x = onoa_thk * np.cos(theta2)
+            delta_y = onoa_thk * np.sin(theta2)
+
+            # line normal to channel surface, width = onoa thk
+            sy_x_eval3[-1] = np.linspace(sy_x_eval2[-1], sy_x_eval2[-1]+delta_x, line_div)
+            sy_y_eval3[-1] = np.linspace(sy_y_eval2[-1], sy_y_eval2[-1]+delta_y, line_div)
+
+            # calculated values
+            interpol_phi.append([])
+            interpol_s.append([])
             
-            sy_normal_line_x = sy_x2 + sy_x3
-            sy_normal_line_y = sy_y2 + (sy_normal) * sy_x3
+            # points
+            interpol_line = []
+            
+            for index in range(line_div):
+                # points
+                interpol_line.append([sy_y_eval3[-1][index], sy_x_eval3[-1][index]])
+                # distance
+                if index == 0:
+                    interpol_s[-1].append(0.0)
+                else:
+                    interpol_s[-1].append(interpol_s[-1][-1] +
+                                          np.sqrt((sy_x_eval3[-1][index]-sy_x_eval3[-1][index-1])**2+
+                                                  (sy_y_eval3[-1][index]-sy_y_eval3[-1][index-1])**2))
+                
+            # potential
+            interpol_phi[-1] = interpol_2d(interpol_line)
 
-            normal = sy_normal.subs(sy_theta, theta)
+            # calculated values
+            R = np.sqrt(sy_x_eval2[-1]**2+sy_y_eval2[-1]**2)
+            dtheta = ch_cut_theta / theta_div
+            dS = R * dtheta
+            if theta == 0.0:
+                dS2 = 0.0
+            else:
+                dS2 = np.sqrt( (sy_x_eval2[-1]-sy_x_eval2[-2])**2 + (sy_y_eval2[-1]-sy_y_eval2[-2])**2 )
+            tunneling_length = np.sum(np.where(3.0-2*np.array(interpol_phi[-1]) > 0.0, 1.0, 0.0))
+            tunneling_area   = np.sum(np.where(3.0-2*np.array(interpol_phi[-1]) > 0.0, 3.0-2*np.array(interpol_phi[-1]), 0.0))
+            
+            #print('%.1f deg, R %.1f A, dtheta %.1f deg, dS %.1f A, dS2 %.1f A, T_length %.1f A, T_area %.1f A^2' %
+            #      (theta/np.pi*180.0, R, dtheta/np.pi*180.0, dS, dS2, tunneling_length, tunneling_area))
+            print('%.1f deg, dtheta %.1f deg, dS %.1f A, T_length %.1f A, T_area %.1f A^2' %
+                  (theta/np.pi*180.0, dtheta/np.pi*180.0, dS2, tunneling_length, tunneling_area))
 
-            for x in [10, 20, 30]:
-                sy_x_eval3[-1].append(sy_normal_line_x.subs( [(sy_theta, theta), (sy_x3, x)] ))
-                sy_y_eval3[-1].append(sy_normal_line_y.subs( [(sy_theta, theta), (sy_x3, x)] ))
+            # calculated result
+            cal_theta.append(theta/np.pi*180.0)
+            cal_dS.append(dS2)
+            cal_T_length.append(tunneling_length)
+            cal_T_area.append(tunneling_area)
+            cal_T_current.append(np.exp(-tunneling_area/cal_T_area[0]))
 
-            #print(sy_x_eval2[-1], sy_y_eval2[-1], normal, sy_x_eval3[-1], sy_y_eval3[-1])
-
-        # visualization 3
+        # saving plots
+        # visualization 1
         fig, ax = plt.subplots(1, 1)
         #
         CS1 = plt.contour(coordi_x, coordi_y, self.phi, levels=15, cmap=cm.jet)
+        
         plt.axis('equal')
         plt.grid(ls=':')
         plt.colorbar()
         plt.title('Electric Potential')
-        plt.savefig('figure_3_phi_.pdf')
-
+        plt.savefig('figure_1_phi_.pdf')
         #
-        plt.plot(sy_x_eval, sy_y_eval, '.')
-        plt.plot(sy_x_eval2, sy_y_eval2, '.')
         for cnt in range(len(sy_x_eval3)):
-            plt.plot(sy_x_eval3[cnt], sy_y_eval3[cnt], 'o-')
+            plt.plot(sy_x_eval3[cnt], sy_y_eval3[cnt])
         plt.axis('equal')
+
+        # visualization 2
+        fig, ax = plt.subplots(1, 1)
+        #
+        for cnt in range(theta_div):
+            plt.plot(interpol_s[cnt], 3.0-2*np.array(interpol_phi[cnt]))
+        plt.plot([-10, 210], [0, 0], 'b:')
+        plt.plot([0, 0], [3, 0], 'k')
+        plt.plot([-10, 0], [0, 0], 'k')
+        
+        plt.grid(ls=':')
+        plt.xlim([-10, 90])
+        plt.ylim([-1,4])
+        plt.title('Conduction band edge profile')
+        plt.savefig('figure_2_c-band_.pdf')
+
+        # visualization 3
+        fig, ax = plt.subplots(2, 2, figsize=[10,8])
+        #
+        ax[0,0].plot(cal_theta[1:], cal_dS[1:], 'bo-')
+        ax[0,0].grid(ls=':')
+        ax[0,0].set_ylim([3.0, 6.0])
+        ax[0,0].set_xlabel('theta [deg]')
+        ax[0,0].set_ylabel('dS [A]')
+        
+        ax[1,0].plot(cal_theta, cal_T_length, 'ro-')
+        ax[1,0].grid(ls=':')
+        ax[1,0].set_ylim([20.0, 40.0])
+        ax[1,0].set_xlabel('theta [deg]')
+        ax[1,0].set_ylabel('Tunneling length [A]')
+
+        ax[0,1].plot(cal_theta, cal_T_area, 'ro-')
+        ax[0,1].grid(ls=':')
+        ax[0,1].set_ylim([20.0, 70.0])
+        ax[0,1].set_xlabel('theta [deg]')
+        ax[0,1].set_ylabel('Tunneling area [A^2]')
+
+        ax[1,1].plot(cal_theta, np.array(cal_T_current)/cal_T_current[0]*100, 'ro-')
+        ax[1,1].grid(ls=':')
+        ax[1,1].set_ylim([80.0, 160.0])
+        ax[1,1].set_xlabel('theta [deg]')
+        ax[1,1].set_ylabel('Tunneling current [%]')
+        
+        plt.savefig('figure_3_tunneling_.pdf')
+
+        # visualization 4
+        fig, ax = plt.subplots(1, 1)
+        #
+        cal_T_current_percent = np.array(cal_T_current[1:]) * np.array(cal_dS[1:])
+        cal_T_current_percent /= np.sum(cal_T_current_percent)
+        ax.plot(cal_theta[1:], cal_T_current_percent*100, 'bo-')
+        ax.grid(ls=':')
+        ax.set_ylim([0.5, 2.5])
+        ax.set_xlabel('theta [deg]')
+        ax.set_ylabel('Tunneling current impact factor')
+
+        plt.savefig('figure_4_tunneling_impact_.pdf')
+   
         plt.show()
         
 
-        
 
 #==============================================
 # main
@@ -626,6 +776,15 @@ if False:
     ax[1,0].imshow(silicon.em)
     ax[1,1].imshow(silicon.phi)
     plt.show()
+
+
+
+
+
+
+
+
+
 
 
 
